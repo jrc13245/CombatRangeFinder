@@ -568,6 +568,11 @@ end
 function crfFrame:PLAYER_ENTERING_WORLD()
   FindMeleeSpell()
 
+  -- Reset cached UI state
+  lastColorState = nil
+  lastAlpha = nil
+  lastTextureInRange = nil
+
   -- clean seen-units
   for k,entry in pairs(CRFDB.units) do
     if not UnitExists(entry.guid) then
@@ -862,6 +867,7 @@ function crfFrame_OnUpdate()
     end
 
     playerdot1.icon:SetPoint("CENTER", UIParent, "CENTER", midX, midY)
+    playerdot1:Show()
     if not playerdot1.icon:IsVisible() then playerdot1.icon:Show() end
   else
     targetdot1.icon:Hide()
