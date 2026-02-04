@@ -4,6 +4,8 @@
 
 local has_vanillautils = pcall(UnitXP, "nop", "nop") and true or false
 local has_superwow = SetAutoloot and true or false
+local has_nampower = (GetSpellIdForName ~= nil)
+local has_unitxp_sp3 = has_vanillautils and pcall(UnitXP, "distanceBetween", "player", "player") and true or false
 
 local updates_per_sec = 60
 
@@ -28,9 +30,6 @@ local GetTime            = GetTime
 local GetScreenWidth     = GetScreenWidth
 local GetScreenHeight    = GetScreenHeight
 local UnitName           = UnitName
-local SpellInfo          = SpellInfo
-local GetActionText      = GetActionText
-local IsActionInRange    = IsActionInRange
 local UnitExists         = UnitExists
 local UnitIsVisible      = UnitIsVisible
 local UnitIsDead         = UnitIsDead
@@ -39,6 +38,15 @@ local UnitClassification = UnitClassification
 local UnitIsPlayer       = UnitIsPlayer
 local UnitCanAttack      = UnitCanAttack
 local UnitRace           = UnitRace
+
+-- Nampower API functions (when available)
+local GetSpellIdForName  = GetSpellIdForName
+local IsSpellInRange     = IsSpellInRange
+
+-- Fallback API functions (used when Nampower is not available)
+local SpellInfo          = SpellInfo
+local GetActionText      = GetActionText
+local IsActionInRange    = IsActionInRange
 
 -- Table and string library functions
 local pairs              = pairs
@@ -269,39 +277,35 @@ local instants = {
   ["Counterattack"] = 1, -- hunter, also war on twow
 }
 
--- store one of your instant actions to check for melee range
-local range_check_slot = nil
-local function Check_Actions(slot)
-  if slot then
-    local name,actionType,identifier = GetActionText(slot);
+-- store a melee spell id to check for melee range
+local melee_spell_id = nil
+local range_check_slot = nil  -- fallback for non-Nampower
 
-    if actionType and identifier and actionType == "SPELL" then
-      local name,rank,texture = SpellInfo(identifier)
-      if instants[name] then
-        range_check_slot = i
-        return -- done
-      end
-    end
-  end
-
-  for i=1,120 do
-    local name,actionType,identifier = GetActionText(i);
-    -- if ActionHasRange(i) then
-    --   print(SpellInfo(identifier))
-    -- end
-
-    if actionType and identifier and actionType == "SPELL" then
-      local name,rank,texture = SpellInfo(identifier)
-      if instants[name] then
-        range_check_slot = i
-        -- print(range_check_slot)
-        -- print(name)
+local function FindMeleeSpell()
+  if has_nampower then
+    -- Use Nampower: look up spells directly from spellbook
+    for name, _ in pairs(instants) do
+      local id = GetSpellIdForName(name)
+      if id and id > 0 then
+        melee_spell_id = id
         return
       end
     end
+    melee_spell_id = nil
+  else
+    -- Fallback: scan action bar slots (original method)
+    for i=1,120 do
+      local name,actionType,identifier = GetActionText(i);
+      if actionType and identifier and actionType == "SPELL" then
+        local name,rank,texture = SpellInfo(identifier)
+        if instants[name] then
+          range_check_slot = i
+          return
+        end
+      end
+    end
+    range_check_slot = nil
   end
-  -- no hits?
-  range_check_slot = nil
 end
 
 crfFrame:SetScript("OnEvent", function ()
@@ -336,6 +340,7 @@ local commands = {
   { name = "markers",     default = true,  desc = "Show raid markers at enemy feet" },
   { name = "markerssize", default = 48,    desc = "Size of markers (default 48)" },
   { name = "largearrow",  default = true,  desc = "Use a larger arrow for enemies who are in range" },
+  { name = "los",         default = true,  desc = "Show line of sight color on arrow" },
 }
 
 local function OffOn(on)
@@ -407,7 +412,12 @@ function crfFrame:ADDON_LOADED(addon)
   -- self:RegisterEvent("UNIT_CASTEVENT")
   self:RegisterEvent("PLAYER_ENTERING_WORLD")
   self:RegisterEvent("UNIT_MODEL_CHANGED")
-  self:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+  self:RegisterEvent("UNIT_DIED")
+  if not has_nampower then
+    self:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+  end
+
+  FindMeleeSpell()
 
   playerdot1 = DotPool:GetDot()
   -- playerdot1.ring:Hide()
@@ -477,8 +487,8 @@ local MARKER_SCALE_FACTOR = 1 - MARKER_MIN_SCALE  -- 0.5
 function crfFrame:UpdateRaidMarkers()
   if not self.raidMarkers then return end
 
-  local px, py, pz = UnitPosition("player")
   local markersize = settings.markerssize
+  local px, py, pz
 
   for mark, marker in ipairs(self.raidMarkers) do
     local _,unit = UnitExists(_mark_table[mark])
@@ -486,7 +496,13 @@ function crfFrame:UpdateRaidMarkers()
       local tx, ty, tz = UnitPosition(unit)
       marker:SetPosition(tx, ty, tz)
 
-      local distance = calculateDistance(px, py, pz, tx, ty, tz)
+      local distance
+      if has_unitxp_sp3 then
+        distance = UnitXP("distanceBetween", "player", unit)
+      else
+        if not px then px, py, pz = UnitPosition("player") end
+        distance = calculateDistance(px, py, pz, tx, ty, tz)
+      end
 
       if distance > MARKER_MAX_DIST then
         marker.icon:Hide()
@@ -515,7 +531,17 @@ function crfFrame:CreateRaidMarkers()
 end
 
 function crfFrame:ACTIONBAR_SLOT_CHANGED(slot)
-  Check_Actions(slot)
+  if not has_nampower then
+    FindMeleeSpell()
+  end
+end
+
+function crfFrame:UNIT_DIED(guid)
+  local _, targetGuid = UnitExists("target")
+  if guid == targetGuid then
+    playerdot1.icon:Hide()
+    lastColorState = nil
+  end
 end
 
 -- Cache player melee range (determined by race, never changes)
@@ -529,14 +555,18 @@ local function GetPlayerMeleeRange()
 end
 
 local function IsInRange(distance)
-  if range_check_slot and UnitCanAttack("player", "target") then
-    return IsActionInRange(range_check_slot) == 1
+  if UnitCanAttack("player", "target") then
+    if has_nampower and melee_spell_id then
+      return IsSpellInRange(melee_spell_id, "target") == 1
+    elseif range_check_slot then
+      return IsActionInRange(range_check_slot) == 1
+    end
   end
   return distance <= GetPlayerMeleeRange()
 end
 
 function crfFrame:PLAYER_ENTERING_WORLD()
-  Check_Actions()
+  FindMeleeSpell()
 
   -- clean seen-units
   for k,entry in pairs(CRFDB.units) do
@@ -753,12 +783,26 @@ function crfFrame_OnUpdate()
 
   -- Arrow update block using cached values
   if crf:ShowArrow() and tx then
-    local obj_distance = calculateDistance(px, py, pz, tx, ty, tz)
+    local obj_distance
+    if has_unitxp_sp3 then
+      obj_distance = UnitXP("distanceBetween", "player", "target")
+    else
+      obj_distance = calculateDistance(px, py, pz, tx, ty, tz)
+    end
     local player_facing = UnitFacing("player")
-    local target_facing = UnitFacing("target")
 
     local is_facing = player_facing and IsUnitFacingUnit(px, py, player_facing, tx, ty, CONSTANT_FACING_LIMIT)
-    local is_behind = target_facing and not IsUnitFacingUnit(tx, ty, target_facing, px, py, HALF_PI)
+    local is_behind
+    if has_unitxp_sp3 then
+      is_behind = UnitXP("behind", "player", "target")
+    else
+      local target_facing = UnitFacing("target")
+      is_behind = target_facing and not IsUnitFacingUnit(tx, ty, target_facing, px, py, HALF_PI)
+    end
+    local has_los = true
+    if has_unitxp_sp3 and settings.los then
+      has_los = UnitXP("inSight", "player", "target")
+    end
 
     local _, _, _, pxPoint, pyPoint = playerdot1:GetPoint()
     local _, _, _, txPoint, tyPoint = targetdot1:GetPoint()
@@ -778,7 +822,14 @@ function crfFrame_OnUpdate()
 
     -- Determine the new color state and desired RGB values.
     local newColorState, r, g, b
-    if IsInRange(obj_distance) then
+    if not has_los then
+      newColorState = "no_los"
+      r, g, b = 0.5, 0.5, 0.5
+      if lastTextureInRange ~= false then
+        playerdot1.icon:SetTexture(textures.out_range)
+        lastTextureInRange = false
+      end
+    elseif IsInRange(obj_distance) then
       if settings.largearrow and lastTextureInRange ~= true then
         playerdot1.icon:SetTexture(textures.in_range)
         lastTextureInRange = true
