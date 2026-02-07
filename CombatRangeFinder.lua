@@ -309,13 +309,22 @@ local function FindMeleeSpell()
 end
 
 crfFrame:SetScript("OnEvent", function ()
-  -- Handle shutdown to prevent SuperWoW API crashes during logout
-  if event == "PLAYER_LOGOUT" or event == "PLAYER_LEAVING_WORLD" then
+  -- Handle permanent shutdown to prevent SuperWoW API crashes during logout
+  if event == "PLAYER_LOGOUT" then
     crf_isShuttingDown = true
     this:UnregisterAllEvents()
     this:SetScript("OnUpdate", nil)
     this:SetScript("OnEvent", nil)
-    -- Hide all dots
+    for i = 1, getn(DotPool) do
+      if DotPool[i] then
+        DotPool[i]:Hide()
+      end
+    end
+    return
+  end
+  -- Pause during zone transitions (OnUpdate skips via crf_isShuttingDown flag)
+  if event == "PLAYER_LEAVING_WORLD" then
+    crf_isShuttingDown = true
     for i = 1, getn(DotPool) do
       if DotPool[i] then
         DotPool[i]:Hide()
@@ -566,6 +575,7 @@ local function IsInRange(distance)
 end
 
 function crfFrame:PLAYER_ENTERING_WORLD()
+  crf_isShuttingDown = false
   FindMeleeSpell()
 
   -- Reset cached UI state
@@ -624,18 +634,16 @@ crfFrame.camera_data = { sinPitch = 0, cosPitch = 0, yaw = 0, sinYaw = 0, cosYaw
 
 function crfFrame:UpdateCamera()
   local camera = self.camera_data
-  
-  local px, py = UnitPosition("player") --or UnitPosition("player")
-  local dy,dx = camera.y - py,camera.x - px
+
+  local px, py = UnitPosition("player")
+  if not px then return end
+
   camera.x, camera.y, camera.z = CameraPosition()
   if not camera.x then
     camera.x = 0
     camera.y = 0
     camera.z = 0
   end
-
-  -- Only update yaw if it's actually changed. Accounts for some odd motion glitches
-  local deltaThreshold = 0.04
 
   camera.yaw = -atan2(camera.y - py, camera.x - px)
 
