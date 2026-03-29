@@ -219,63 +219,72 @@ end
 
 
 -- Instants to use to check for in-melee range
-local instants = {
-  ["Backstab"] = 1,
-  ["Sinister Strike"] = 1,
-  ["Kick"] = 1,
-  ["Expose Armor"] = 1,
-  ["Eviscerate"] = 1,
-  ["Rupture"] = 1,
-  ["Kidney Shot"] = 1,
-  ["Garrote"] = 1,
-  ["Ambush"] = 1,
-  ["Cheap Shot"] = 1,
-  ["Gouge"] = 1,
-  ["Feint"] = 1,
-  ["Ghosly Strike"] = 1,
-  ["Hemorrhage"] = 1,
-  -- ["Riposte"] = 1, -- maybe
+-- Ordered list of melee abilities to check for range (searched in order, first match wins)
+-- Avoid taunts/threat abilities (Taunt, Mocking Blow, Growl) as they may have non-melee range
+local instants_ordered = {
+  -- Warrior
+  "Hamstring",
+  "Rend",
+  "Sunder Armor",
+  "Bloodthirst",
+  "Mortal Strike",
+  "Shield Slam",
+  "Overpower",
+  "Revenge",
+  "Pummel",
+  "Shield Bash",
+  "Disarm",
+  "Execute",
+  "Slam",
 
-  ["Hamstring"] = 1,
-  ["Sunder Armor"] = 1,
-  ["Bloodthirst"] = 1,
-  ["Mortal Strike"] = 1,
-  ["Shield Slam"] = 1,
-  ["Overpower"] = 1,
-  ["Revenge"] = 1,
-  ["Pummel"] = 1,
-  ["Shield Bash"] = 1,
-  ["Disarm"] = 1,
-  ["Execute"] = 1,
-  ["Taunt"] = 1,
-  ["Mocking Blow"] = 1,
-  ["Slam"] = 1,
-  -- ["Decisive Strike"] = 1, -- gone
-  ["Rend"] = 1,
+  -- Rogue
+  "Sinister Strike",
+  "Backstab",
+  "Kick",
+  "Expose Armor",
+  "Eviscerate",
+  "Rupture",
+  "Kidney Shot",
+  "Garrote",
+  "Ambush",
+  "Cheap Shot",
+  "Gouge",
+  "Feint",
+  "Ghostly Strike",
+  "Hemorrhage",
 
-  ["Crusader Strike"] = 1,
-  ["Holy Strike"] = 1,
+  -- Paladin
+  "Crusader Strike",
+  "Holy Strike",
 
-  ["Storm Strike"] = 1,
+  -- Shaman
+  "Storm Strike",
 
-  ["Savage Bite"] = 1,
-  ["Growl"] = 1,
-  ["Bash"] = 1,
-  ["Swipe"] = 1,
-  ["Claw"] = 1,
-  ["Rip"] = 1,
-  ["Ferocious Bite"] = 1,
-  ["Shred"] = 1,
-  ["Rake"] = 1,
-  ["Cower"] = 1,
-  ["Ravage"] = 1,
-  ["Pounce"] = 1,
+  -- Druid
+  "Savage Bite",
+  "Bash",
+  "Swipe",
+  "Claw",
+  "Rip",
+  "Ferocious Bite",
+  "Shred",
+  "Rake",
+  "Cower",
+  "Ravage",
+  "Pounce",
 
-  ["Wing Clip"] = 1,
-  ["Disengage"] = 1,
-  ["Carve"] = 1, -- twow
-  ["Counterattack"] = 1, -- hunter, also war on twow
+  -- Hunter
+  "Wing Clip",
+  "Disengage",
+  "Carve", -- twow
+  "Counterattack", -- hunter, also war on twow
 }
+
+-- Hash lookup for the action bar fallback path
+local instants = {}
+for _, name in ipairs(instants_ordered) do
+  instants[name] = 1
+end
 
 -- store a melee spell id to check for melee range
 local melee_spell_id = nil
@@ -283,8 +292,8 @@ local range_check_slot = nil  -- fallback for non-Nampower
 
 local function FindMeleeSpell()
   if has_nampower then
-    -- Use Nampower: look up spells directly from spellbook
-    for name, _ in pairs(instants) do
+    -- Use Nampower: look up spells directly from spellbook (ordered search)
+    for _, name in ipairs(instants_ordered) do
       local id = GetSpellIdForName(name)
       if id and id > 0 then
         melee_spell_id = id
@@ -553,25 +562,11 @@ function crfFrame:UNIT_DIED(guid)
   end
 end
 
--- Cache player melee range (determined by race, never changes)
-local _player_melee_range = nil
-
-local function GetPlayerMeleeRange()
-  if not _player_melee_range then
-    _player_melee_range = (UnitRace("player") == "Tauren") and 6.5 or 5
-  end
-  return _player_melee_range
-end
+-- Melee range threshold for distanceBetween (edge-to-edge, hitbox-aware)
+local MELEE_RANGE = 2.00
 
 local function IsInRange(distance)
-  if UnitCanAttack("player", "target") then
-    if has_nampower and melee_spell_id then
-      return IsSpellInRange(melee_spell_id, "target") == 1
-    elseif range_check_slot then
-      return IsActionInRange(range_check_slot) == 1
-    end
-  end
-  return distance <= GetPlayerMeleeRange()
+  return distance <= MELEE_RANGE
 end
 
 function crfFrame:PLAYER_ENTERING_WORLD()

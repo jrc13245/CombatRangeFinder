@@ -22,14 +22,18 @@ This is a single-file addon (`CombatRangeFinder.lua`) with no build system, test
 ### Key systems in CombatRangeFinder.lua:
 
 - **DotPool** (line ~115): Object pool pattern for reusable UI frames ("dots") that get projected into 3D world space. Each dot has a world position (x,y,z) and gets screen-projected every frame.
-- **3D-to-screen projection** (lines ~610-787): Camera position/orientation is read via `UnitXP` APIs, then each dot's world coordinates are transformed through yaw/pitch rotation and perspective projection to screen coordinates. FOV is calibrated via a piecewise-linear lookup table (`ScaleFOV`).
-- **Arrow indicator** (lines ~789-875): A textured line drawn between player and target screen positions. Color encodes state: green=in-range+facing, orange=not-facing, teal=behind-target, red=out-of-range, gray=no-line-of-sight. Uses `RotateTexture` for angle alignment.
-- **Raid markers** (lines ~446-531): 8 markers from the raid icon texture atlas, projected at marked unit feet positions. Distance-based scaling fades them out beyond 40 yards.
+- **3D-to-screen projection** (lines ~620-795): Camera position/orientation is read via `UnitXP` APIs, then each dot's world coordinates are transformed through yaw/pitch rotation and perspective projection to screen coordinates. FOV is calibrated via a piecewise-linear lookup table (`ScaleFOV`).
+- **Arrow indicator** (lines ~797-883): A textured line drawn between player and target screen positions. Color encodes state: green=in-range+facing, orange=not-facing, teal=behind-target, red=out-of-range, gray=no-line-of-sight. Uses `RotateTexture` for angle alignment.
+- **Raid markers** (lines ~454-540): 8 markers from the raid icon texture atlas, projected at marked unit feet positions. Distance-based scaling fades them out beyond 40 yards.
 - **Melee range detection** (`FindMeleeSpell`, `IsInRange`): Checks if player has a known melee ability, then uses either Nampower's `IsSpellInRange` or action bar `IsActionInRange` to determine true melee range. Falls back to distance-based check (5 yards, 6.5 for Tauren).
+- **Event dispatch**: `OnEvent` handler dispatches to methods on `crfFrame` by event name (e.g. `crfFrame:ADDON_LOADED()`). New events need both a `crfFrame:EVENT_NAME()` method and a `RegisterEvent` call.
+- **Shutdown guard**: `crf_isShuttingDown` flag prevents SuperWoW API calls during logout/zone transitions (crashes the client otherwise). Set on `PLAYER_LOGOUT`/`PLAYER_LEAVING_WORLD`, cleared on `PLAYER_ENTERING_WORLD`.
 
 ### Saved variables
 
-Per-character settings stored in `CRFDB.settings` (SavedVariablesPerCharacter). Toggled via `/crf <option>`. Settings defined in the `commands` table (~line 336).
+Per-character settings stored in `CRFDB.settings` (SavedVariablesPerCharacter). Toggled via `/crf <option>`. Settings defined in the `commands` table (~line 345).
+
+`CRFDB.units` caches unit data (guid, name, type) keyed by GUID, cleaned on zone entry.
 
 ## WoW 1.12 Lua Environment
 
@@ -38,6 +42,10 @@ Per-character settings stored in `CRFDB.settings` (SavedVariablesPerCharacter). 
 - Frame API: `CreateFrame`, `SetScript("OnUpdate")`, `SetScript("OnEvent")`, `SetPoint`, `SetTexCoord`, etc.
 - All WoW API globals (`UnitExists`, `UnitName`, `GetTime`, etc.) are undefined from a static analysis perspective — these are provided by the game client at runtime. LSP "undefined-global" warnings for WoW API functions are expected and not bugs.
 - `math.mod` is deprecated in Lua 5.3+ but correct for this 1.12 client environment.
+
+### LSP Configuration
+
+`.luarc.json` configures the Lua language server: Lua 5.1 runtime, event handler globals (`arg`, `arg1`-`arg9`, `event`), and type definitions from `../wow-api-type-definitions/` (Client + UI_Turtle).
 
 ## Slash Commands
 
